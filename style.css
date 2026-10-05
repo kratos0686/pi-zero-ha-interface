@@ -1,0 +1,156 @@
+:root {
+  --bg: #f2f3f5;
+  --card: #ffffff;
+  --card-on: #fff4d6;
+  --text: #1c1d21;
+  --muted: #6b6f78;
+  /* Dark enough for 3:1+ focus/outline contrast on the light backgrounds. */
+  --accent: #b45309;
+  /* Status dot colours: 3:1+ against the page background in both themes. */
+  --ok: #178a56;
+  --warn: #a9821a;
+  /* 5.3:1 with white error text; 3:1+ as the status dot in both themes. */
+  --bad: #cd2b31;
+  --radius: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111317;
+    --card: #1d2026;
+    --card-on: #3a3120;
+    --text: #eceef2;
+    --muted: #9097a3;
+    --accent: #f5a623;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #111317;
+  --card: #1d2026;
+  --card-on: #3a3120;
+  --text: #eceef2;
+  --muted: #9097a3;
+  --accent: #f5a623;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 4px;
+}
+
+h1 { margin: 0; font-size: 1.4rem; font-weight: 600; }
+
+.status { display: flex; align-items: center; gap: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.conn { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.conn-ok { background: var(--ok); }
+.conn-connecting { background: var(--warn); }
+.conn-down { background: var(--bad); }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  padding: 12px 16px 16px;
+}
+
+.tile {
+  position: relative;
+  min-height: 110px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: background-color 0.15s, transform 0.08s;
+}
+
+.tile.actionable { cursor: pointer; }
+.tile-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: inherit;
+}
+.tile-main:focus-visible { outline: 3px solid var(--accent); outline-offset: 6px; border-radius: 8px; }
+.tile.actionable:active { transform: scale(0.97); }
+.tile.on { background: var(--card-on); }
+/* Mark state without fading the text, which must stay readable. */
+.tile.unavailable { background: var(--bg); box-shadow: none; outline: 2px dashed var(--muted); outline-offset: -2px; }
+.tile.unavailable .icon, .tile.pending .icon { opacity: 0.4; filter: grayscale(1); }
+.tile.pending { cursor: progress; }
+.tile.confirm { outline: 3px solid var(--accent); }
+
+.tile .icon { font-size: 1.8rem; line-height: 1; }
+.tile .name { font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .state { color: var(--muted); font-size: 0.85rem; }
+.tile .value { font-size: 1.6rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.tile input[type="range"] { width: 100%; margin: 6px 0 0; accent-color: var(--accent); }
+
+.climate-controls { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.climate-controls .value { font-size: 1.3rem; }
+.climate-controls button {
+  width: 40px; height: 40px;
+  border-radius: 50%; border: 0;
+  background: var(--bg); color: var(--text);
+  font-size: 1.3rem;
+}
+
+.error, .toast {
+  padding: 12px 16px;
+  border-radius: 12px;
+  color: #fff;
+}
+/* The error sits in the page flow under the header, so a toast can never
+   cover it. */
+.error { background: var(--bad); margin: 4px 16px 0; }
+.toast {
+  position: fixed;
+  left: 16px; right: 16px; bottom: 16px;
+  background: rgba(0, 0, 0, 0.8);
+  text-align: center;
+  pointer-events: none;
+}
+.error:empty, .toast:empty { padding: 0; margin: 0; background: transparent; }

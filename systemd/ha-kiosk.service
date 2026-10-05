@@ -1,0 +1,25 @@
+[Unit]
+Description=Home Assistant dashboard kiosk (cage + Chromium on tty1)
+After=systemd-user-sessions.service plymouth-quit-wait.service ha-dashboard.service getty@tty1.service
+Wants=ha-dashboard.service
+Conflicts=getty@tty1.service
+
+[Service]
+User=@USER@
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+ExecStart=@INSTALL_DIR@/kiosk.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=Home Assistant dashboard web server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@INSTALL_DIR@
+ExecStart=/usr/bin/python3 @INSTALL_DIR@/server.py --host 127.0.0.1 --port 8080 --config @INSTALL_DIR@/config.json
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

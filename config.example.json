@@ -1,0 +1,20 @@
+{
+  "ha_url": "https://homeassistant.local:8123",
+  "token": "PASTE_A_LONG_LIVED_ACCESS_TOKEN_HERE",
+  "title": "Living Room",
+  "theme": "auto",
+  "tiles": [
+    { "entity": "light.living_room", "name": "Ceiling" },
+    { "entity": "light.floor_lamp" },
+    { "entity": "switch.tv_power", "name": "TV", "icon": "📺" },
+    { "entity": "fan.bedroom" },
+    { "entity": "cover.garage_door", "name": "Garage" },
+    { "entity": "lock.front_door", "name": "Front Door" },
+    { "entity": "scene.movie_night", "name": "Movie Night" },
+    { "entity": "script.good_night", "name": "Good Night" },
+    { "entity": "climate.thermostat", "name": "Thermostat" },
+    { "entity": "sensor.living_room_temperature", "name": "Temp" },
+    { "entity": "sensor.living_room_humidity", "name": "Humidity" },
+    { "entity": "binary_sensor.front_door_contact", "name": "Door" }
+  ]
+}

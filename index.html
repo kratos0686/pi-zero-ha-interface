@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Home Dashboard</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1 id="title">Home</h1>
+    <div class="status">
+      <span id="clock"></span>
+      <span id="conn" class="conn conn-connecting" title="Connecting…" aria-hidden="true"></span>
+      <span id="conn-text" class="visually-hidden" role="status">Connecting…</span>
+    </div>
+  </header>
+  <div id="error" class="error" role="alert"></div>
+  <main id="grid" class="grid"></main>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
