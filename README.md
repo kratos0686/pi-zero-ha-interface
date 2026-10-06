@@ -35,8 +35,8 @@ only a thin client on the Pi:
 
    ```sh
    sudo apt-get install -y git
-   git clone https://github.com/kratos0686/hello-github-actions.git
-   cd hello-github-actions/pi-ha-interface
+   git clone https://github.com/kratos0686/pi-zero-ha-interface.git
+   cd pi-zero-ha-interface
    sudo ./install.sh            # or: sudo ./install.sh --no-kiosk
    sudo nano /opt/ha-dashboard/config.json
    sudo reboot
