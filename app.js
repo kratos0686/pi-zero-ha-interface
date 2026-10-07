@@ -29,11 +29,12 @@
     light: "💡", switch: "🔌", fan: "🌀", cover: "🚪", lock: "🔒",
     scene: "🎬", script: "📜", climate: "🌡️", sensor: "📈",
     binary_sensor: "⚪", input_boolean: "✅", automation: "🤖",
-    button: "🔘", media_player: "🎵", person: "👤", vacuum: "🧹",
+    button: "🔘", media_player: "🎵", camera: "📷", person: "👤", vacuum: "🧹",
   };
   const TOGGLE_DOMAINS = new Set(["light", "switch", "fan", "input_boolean", "automation", "media_player"]);
   // Domains where an accidental tap matters: require a second tap to confirm.
-  const CONFIRM_DOMAINS = new Set(["lock", "cover"]);
+  const CONFIRM_DOMAINS = new Set(["lock"]);
+  // Covers get explicit Open / Stop / Close buttons instead of a tile tap.
   const ON_STATES = new Set(["on", "open", "opening", "unlocked", "playing", "home", "heat", "cool", "heat_cool", "auto"]);
 
   const tiles = new Map(); // entity_id -> { tile, el, parts }
@@ -108,7 +109,16 @@
         parts.main = body;
         root.append(body);
       }
-      body.append(parts.icon);
+      if (domain === "camera") {
+        root.classList.add("camera");
+        parts.img = el("img", "cam-img");
+        parts.img.alt = "";
+        parts.img.decoding = "async";
+        body.append(parts.img);
+        cameras.push({ tile, parts, busy: false, last: 0 });
+      } else {
+        body.append(parts.icon);
+      }
 
       if (domain === "sensor") {
         parts.value = el("div", "value", "—");
@@ -129,6 +139,23 @@
           callService("light", "turn_on", tile.entity, { brightness_pct: Number(parts.slider.value) }).catch(() => {});
         });
         root.append(parts.slider);
+      }
+
+      if (domain === "cover") {
+        const row = el("div", "cover-controls");
+        for (const [label, svc, aria] of [["▲", "open_cover", "Open"], ["■", "stop_cover", "Stop"], ["▼", "close_cover", "Close"]]) {
+          const btn = el("button", null, label);
+          btn.type = "button";
+          btn.setAttribute("aria-label", aria + " " + (tile.name || tile.entity));
+          stopTap(btn);
+          btn.addEventListener("click", () => {
+            const st = states.get(tile.entity);
+            if (!st || st.state === "unavailable") { toast("Unavailable"); return; }
+            callService("cover", svc, tile.entity).then(() => toast((tile.name || tile.entity) + ": " + aria), () => {});
+          });
+          row.append(btn);
+        }
+        root.append(row);
       }
 
       if (domain === "climate") {
@@ -164,7 +191,7 @@
   }
 
   function isActionable(domain) {
-    return TOGGLE_DOMAINS.has(domain) || CONFIRM_DOMAINS.has(domain) ||
+    return TOGGLE_DOMAINS.has(domain) || CONFIRM_DOMAINS.has(domain) || domain === "camera" ||
       domain === "scene" || domain === "script" || domain === "button";
   }
 
@@ -179,6 +206,9 @@
     }
     if (domain === "light" && s.state === "on" && s.attributes.brightness != null) {
       return "On · " + Math.round((s.attributes.brightness / 255) * 100) + "%";
+    }
+    if (domain === "cover" && s.attributes.current_position != null) {
+      return s.state.replace(/^./, (c) => c.toUpperCase()) + " · " + s.attributes.current_position + "%";
     }
     if (domain === "climate") {
       const cur = s.attributes.current_temperature;
@@ -225,6 +255,12 @@
       }
     }
 
+    if (parts.img && s && s.attributes.access_token &&
+        parts.img.dataset.token !== s.attributes.access_token) {
+      parts.img.dataset.token = s.attributes.access_token;
+      refreshCamera(cameras.find((c) => c.tile === tile), true);
+    }
+
     if (parts.target) {
       const target = s && s.attributes.temperature;
       parts.target.textContent = target != null ? target + "°" : "—";
@@ -259,6 +295,10 @@
     const stateless = domain === "scene" || domain === "button";
     if (!s || s.state === "unavailable" || (s.state === "unknown" && !stateless)) {
       toast("Unavailable");
+      return;
+    }
+    if (domain === "camera") {
+      openLive(tile, s);
       return;
     }
     // A second tap before HA answers would send a second toggle and could
@@ -336,6 +376,57 @@
       }
     });
   }
+
+  /* ---------- Cameras ---------- */
+
+  const cameras = []; // { tile, parts, busy, last }
+  let liveOpen = false;
+
+  function camToken(entityId) {
+    const s = states.get(entityId);
+    return s && s.state !== "unavailable" ? s.attributes.access_token : null;
+  }
+
+  // Snapshots through HA's camera proxy. One request per camera at a time,
+  // and nothing while the live view is up, to spare the Zero's CPU.
+  function refreshCamera(cam, force) {
+    if (!cam || cam.busy || liveOpen || document.hidden) return;
+    const period = (Number(cam.tile.refresh) || 10) * 1000;
+    if (!force && Date.now() - cam.last < period) return;
+    const token = camToken(cam.tile.entity);
+    if (!token) return;
+    cam.busy = true;
+    cam.last = Date.now();
+    const img = new Image();
+    img.onload = () => { cam.parts.img.src = img.src; cam.busy = false; };
+    img.onerror = () => { cam.busy = false; };
+    img.src = cfg.haUrl + "/api/camera_proxy/" + cam.tile.entity +
+      "?token=" + encodeURIComponent(token) + "&_=" + Date.now();
+  }
+  setInterval(() => { for (const c of cameras) refreshCamera(c); }, 1000);
+
+  let liveTimer = null;
+  function openLive(tile, s) {
+    const token = s.attributes.access_token;
+    if (!token) { toast("No camera token yet"); return; }
+    const ov = $("live");
+    const img = $("live-img");
+    $("live-name").textContent = tile.name || s.attributes.friendly_name || tile.entity;
+    liveOpen = true;
+    img.src = cfg.haUrl + "/api/camera_proxy_stream/" + tile.entity + "?token=" + encodeURIComponent(token);
+    ov.hidden = false;
+    clearTimeout(liveTimer);
+    // MJPEG decoding is heavy on a Zero 2W: close by itself after 3 minutes.
+    liveTimer = setTimeout(closeLive, 180000);
+  }
+  function closeLive() {
+    clearTimeout(liveTimer);
+    const img = $("live-img");
+    img.removeAttribute("src"); // aborts the MJPEG stream
+    $("live").hidden = true;
+    liveOpen = false;
+  }
+  $("live").addEventListener("click", closeLive);
 
   /* ---------- WebSocket ---------- */
 

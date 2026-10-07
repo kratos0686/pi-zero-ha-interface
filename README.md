@@ -21,7 +21,7 @@ only a thin client on the Pi:
 - **Tiles** for lights (tap to toggle, with a brightness slider), switches, fans,
   input booleans, automations, media players (play/pause), scenes, scripts,
   buttons, climate (± target temperature), sensors and binary sensors.
-- **Locks and covers need two taps**, so an accidental tap can't unlock the door or open the garage.
+- **Locks need two taps**, so an accidental tap can't unlock the door. Covers get Open / Stop / Close buttons.
 - Light/dark theme and a clock in the header.
 
 ## Setup
