@@ -198,3 +198,29 @@ h1 { margin: 0; font-size: 1.4rem; font-weight: 600; }
   font-size: 1.1rem;
 }
 .cover-controls button:active { transform: scale(0.94); background: var(--card-on); }
+
+/* Background art (static/bg.jpg) with a teal palette to match it.
+   Set "theme": "dark" in config.json for this look. */
+:root[data-theme="dark"] {
+  --bg: #05090b;
+  --card: rgba(10, 18, 22, 0.62);
+  --card-on: rgba(38, 120, 114, 0.6);
+  --text: #e6f4f3;
+  --muted: #a3bfbd;
+  --accent: #4fd1c5;
+}
+:root[data-theme="dark"], :root[data-theme="dark"] body { background: transparent; }
+:root[data-theme="dark"] { background-color: #05090b; }
+/* A fixed layer is sized to the screen and cheap to keep in place on scroll. */
+:root[data-theme="dark"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: url("bg.jpg") center / cover no-repeat;
+}
+:root[data-theme="dark"] header { text-shadow: 0 1px 3px #000; }
+:root[data-theme="dark"] .tile { box-shadow: 0 0 0 1px rgba(79, 209, 197, 0.18); }
+:root[data-theme="dark"] .tile.unavailable { background: rgba(10, 18, 22, 0.55); }
+:root[data-theme="dark"] .cover-controls button,
+:root[data-theme="dark"] .climate-controls button { background: rgba(79, 209, 197, 0.12); }

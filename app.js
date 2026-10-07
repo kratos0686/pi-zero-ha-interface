@@ -199,6 +199,9 @@
     if (!s) return "—";
     const unit = s.attributes.unit_of_measurement;
     const domain = s.entity_id.split(".")[0];
+    if (s.state === "unavailable" || (s.state === "unknown" && domain !== "scene" && domain !== "button")) {
+      return s.state.replace(/^./, (c) => c.toUpperCase());
+    }
     if (domain === "sensor") {
       const n = Number(s.state);
       const val = Number.isFinite(n) && s.state.trim() !== "" ? String(Math.round(n * 10) / 10) : s.state;
