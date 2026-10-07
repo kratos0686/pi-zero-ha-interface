@@ -235,9 +235,12 @@
 
     root.classList.remove("pending");
     root.classList.toggle("unavailable", unavailable);
-    root.classList.toggle("on", !!s && ON_STATES.has(s.state));
+    const isOn = !!s && (domain === "media_player"
+      ? !["off", "standby", "unavailable", "unknown"].includes(s.state)
+      : ON_STATES.has(s.state));
+    root.classList.toggle("on", isOn);
     if (parts.main && TOGGLE_DOMAINS.has(domain)) {
-      parts.main.setAttribute("aria-pressed", String(!!s && ON_STATES.has(s.state)));
+      parts.main.setAttribute("aria-pressed", String(isOn));
     }
 
     if (!tile.name && s && s.attributes.friendly_name) parts.name.textContent = s.attributes.friendly_name;
@@ -345,7 +348,7 @@
       case "cover": return state === "closed" || state === "closing" ? "open_cover" : "close_cover";
       case "scene": case "script": return "turn_on";
       case "button": return "press";
-      case "media_player": return "media_play_pause";
+      case "media_player": return "toggle"; // power on/off; play/pause fails on an idle Cast device
       default: return "toggle";
     }
   }
