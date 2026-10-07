@@ -94,10 +94,22 @@
     grid.textContent = "";
     tiles.clear();
     cameras.length = 0;
+    let securityAdded = false;
     for (const tile of list) {
       if (tile.heading) {
         grid.append(el("h2", "area-heading", tile.heading));
         continue;
+      }
+      // A "Security" tile in front of the first camera opens all cameras full screen.
+      if (!securityAdded && tile.entity.startsWith("camera.")) {
+        securityAdded = true;
+        const sec = el("div", "tile actionable security-tile");
+        const main = el("button", "tile-main");
+        main.type = "button";
+        main.append(el("div", "icon", "🛡️"), el("div", "name", "Security"), el("div", "state", "All cameras"));
+        sec.append(main);
+        sec.addEventListener("click", openSecurity);
+        grid.append(sec);
       }
       const domain = tile.entity.split(".")[0];
       const root = el("div", "tile unavailable");
@@ -189,6 +201,7 @@
       tiles.set(tile.entity, { tile, el: root, parts });
       grid.append(root);
     }
+    if (secOpen) openSecurity();
   }
 
   function stopTap(node) {
@@ -402,7 +415,7 @@
   // Snapshots through HA's camera proxy. One request per camera at a time,
   // and nothing while the live view is up, to spare the Zero's CPU.
   function refreshCamera(cam, force) {
-    if (!cam || cam.busy || liveOpen || document.hidden) return;
+    if (!cam || cam.busy || liveOpen || secOpen || document.hidden) return;
     const period = (Number(cam.tile.refresh) || 10) * 1000;
     if (!force && Date.now() - cam.last < period) return;
     const token = camToken(cam.tile.entity);
@@ -439,6 +452,70 @@
     liveOpen = false;
   }
   $("live").addEventListener("click", closeLive);
+
+  /* ---------- Security view: every camera, filling the screen ---------- */
+
+  let secOpen = false;
+  let secTimer = null;
+  let secAuto = null;
+  let secIdx = 0;
+
+  function openSecurity() {
+    const n = cameras.length;
+    if (!n) { toast("No cameras"); return; }
+    const grid = $("sec-grid");
+    grid.textContent = "";
+    const cols = Math.ceil(Math.sqrt(n));
+    grid.style.gridTemplateColumns = "repeat(" + cols + ", 1fr)";
+    grid.style.gridTemplateRows = "repeat(" + Math.ceil(n / cols) + ", 1fr)";
+    for (const cam of cameras) {
+      const cell = el("div", "sec-cell");
+      const img = el("img");
+      img.alt = "";
+      if (cam.parts.img.src) img.src = cam.parts.img.src;
+      const st = states.get(cam.tile.entity);
+      cell.append(img, el("span", null, cam.tile.name || (st && st.attributes.friendly_name) || cam.tile.entity));
+      cell.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const cur = states.get(cam.tile.entity);
+        if (cur && cur.state !== "unavailable") openLive(cam.tile, cur);
+        else toast("Unavailable");
+      });
+      cam.secImg = img;
+      grid.append(cell);
+    }
+    secOpen = true;
+    $("sec").hidden = false;
+    clearInterval(secTimer);
+    // One snapshot request at a time, round-robin: each camera refreshes
+    // every (cameras x 0.8 s), which the Zero 2W can keep up with.
+    secTimer = setInterval(secTick, 800);
+    clearTimeout(secAuto);
+    secAuto = setTimeout(closeSecurity, 10 * 60 * 1000);
+  }
+
+  function secTick() {
+    if (!secOpen || liveOpen || document.hidden || !cameras.length) return;
+    const cam = cameras[secIdx++ % cameras.length];
+    const token = camToken(cam.tile.entity);
+    if (cam.secBusy || !token || !cam.secImg) return;
+    cam.secBusy = true;
+    const img = new Image();
+    img.onload = () => { if (cam.secImg) cam.secImg.src = img.src; cam.secBusy = false; };
+    img.onerror = () => { cam.secBusy = false; };
+    img.src = cfg.haUrl + "/api/camera_proxy/" + cam.tile.entity +
+      "?token=" + encodeURIComponent(token) + "&_=" + Date.now();
+  }
+
+  function closeSecurity() {
+    secOpen = false;
+    clearInterval(secTimer);
+    clearTimeout(secAuto);
+    $("sec").hidden = true;
+    $("sec-grid").textContent = "";
+    for (const cam of cameras) cam.secImg = null;
+  }
+  $("sec-bar").addEventListener("click", closeSecurity);
 
   /* ---------- Mirror Home Assistant ---------- */
 

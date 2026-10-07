@@ -233,3 +233,27 @@ h1 { margin: 0; font-size: 1.4rem; font-weight: 600; }
   font-weight: 600;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
+
+/* Security view: all cameras in a grid filling the screen. */
+.security-tile .icon { font-size: 2.4rem; }
+.sec {
+  position: fixed;
+  inset: 0;
+  z-index: 9; /* under the single-camera live view */
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+.sec[hidden] { display: none; }
+.sec-grid { flex: 1; min-height: 0; display: grid; gap: 2px; }
+.sec-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #111; }
+.sec-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sec-cell span {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  color: #fff;
+  font-size: 0.9rem;
+  text-shadow: 0 1px 3px #000;
+}
+#sec-bar { cursor: pointer; }
