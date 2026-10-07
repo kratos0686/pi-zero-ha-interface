@@ -88,7 +88,16 @@ def load_config(path):
             raise ConfigError(f"tiles[{i}]: {entity} is listed more than once")
         seen.add(entity)
 
+    mirror = raw.get("mirror", False)
+    if not isinstance(mirror, (bool, str)):
+        raise ConfigError("mirror must be true, false, or a dashboard url_path")
+    exclude = raw.get("exclude", [])
+    if not isinstance(exclude, list) or not all(isinstance(x, str) for x in exclude):
+        raise ConfigError("exclude must be a list of entity ids or patterns like 'sensor.sun_*'")
+
     return {
+        "mirror": mirror,
+        "exclude": exclude,
         "haUrl": ha_url,
         "token": raw["token"],
         "title": raw.get("title", "Home"),

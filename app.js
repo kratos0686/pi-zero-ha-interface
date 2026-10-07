@@ -89,10 +89,16 @@
     return e;
   }
 
-  function buildTiles() {
+  function buildTiles(list) {
     const grid = $("grid");
     grid.textContent = "";
-    for (const tile of cfg.tiles) {
+    tiles.clear();
+    cameras.length = 0;
+    for (const tile of list) {
+      if (tile.heading) {
+        grid.append(el("h2", "area-heading", tile.heading));
+        continue;
+      }
       const domain = tile.entity.split(".")[0];
       const root = el("div", "tile unavailable");
       const parts = {
@@ -434,6 +440,85 @@
   }
   $("live").addEventListener("click", closeLive);
 
+  /* ---------- Mirror Home Assistant ---------- */
+
+  // With "mirror" set, tiles come from HA instead of config.json: every
+  // entity, grouped by area like HA's auto-generated Overview dashboard, or
+  // the entities of a saved dashboard when "mirror" names one. config.json
+  // tiles then only override names/icons, and "exclude" hides entities.
+  const MIRROR_DOMAINS = ["camera", "light", "switch", "fan", "cover", "climate", "media_player",
+    "lock", "vacuum", "scene", "script", "button", "input_boolean", "binary_sensor", "sensor"];
+  const REGISTRY_EVENTS = ["entity_registry_updated", "device_registry_updated",
+    "area_registry_updated", "lovelace_updated"];
+  const excludeRes = (cfg.exclude || []).map((p) =>
+    new RegExp("^" + p.split("*").map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$"));
+  const overrides = new Map((cfg.tiles || []).map((t) => [t.entity, t]));
+
+  function excluded(id) { return excludeRes.some((re) => re.test(id)); }
+
+  function collectEntities(node, out) {
+    if (Array.isArray(node)) {
+      for (const n of node) {
+        if (typeof n === "string" && /^[a-z_]+\.[a-z0-9_]+$/.test(n)) out.push(n);
+        else collectEntities(n, out);
+      }
+    } else if (node && typeof node === "object") {
+      if (typeof node.entity === "string") out.push(node.entity);
+      for (const v of Object.values(node)) if (v && typeof v === "object") collectEntities(v, out);
+    }
+    return out;
+  }
+
+  async function mirrorTiles() {
+    const withOverrides = (id) => Object.assign({ entity: id }, overrides.get(id));
+    if (typeof cfg.mirror === "string") {
+      try {
+        const lv = await send({ type: "lovelace/config", url_path: cfg.mirror === "default" ? null : cfg.mirror });
+        const ids = [...new Set(collectEntities(lv, []))].filter((id) => !excluded(id));
+        if (ids.length) return ids.map(withOverrides);
+      } catch (_) { /* no saved dashboard: fall back to the auto layout */ }
+    }
+    const [ents, devs, areas, all] = await Promise.all([
+      send({ type: "config/entity_registry/list" }),
+      send({ type: "config/device_registry/list" }),
+      send({ type: "config/area_registry/list" }),
+      send({ type: "get_states" }),
+    ]);
+    const reg = new Map(ents.map((e) => [e.entity_id, e]));
+    const devArea = new Map(devs.map((d) => [d.id, d.area_id]));
+    const groups = new Map();
+    for (const st of all) {
+      const id = st.entity_id;
+      const rank = MIRROR_DOMAINS.indexOf(id.split(".")[0]);
+      if (rank < 0 || excluded(id)) continue;
+      const r = reg.get(id);
+      // Same rule as HA's Overview: skip config/diagnostic, hidden and disabled entities.
+      if (r && (r.entity_category || r.hidden_by || r.disabled_by)) continue;
+      let area = (r && (r.area_id || devArea.get(r.device_id))) || "";
+      if (!area && rank === 0) area = "\u0000cameras"; // area-less cameras get their own section on top
+      if (!groups.has(area)) groups.set(area, []);
+      groups.get(area).push({ id, rank, label: String(st.attributes.friendly_name || id).toLowerCase() });
+    }
+    const list = [];
+    for (const a of ["\u0000cameras", ...areas.map((x) => x.area_id), ""]) {
+      const g = groups.get(a);
+      if (!g || !g.length) continue;
+      g.sort((x, y) => x.rank - y.rank || x.label.localeCompare(y.label));
+      const heading = a === "\u0000cameras" ? "Cameras" : a ? (areas.find((x) => x.area_id === a) || {}).name || a : "Other";
+      list.push({ heading });
+      for (const t of g) list.push(withOverrides(t.id));
+    }
+    return list;
+  }
+
+  let resyncTimer = null;
+  function scheduleResync() {
+    clearTimeout(resyncTimer);
+    resyncTimer = setTimeout(() => {
+      loadSnapshot().catch((err) => showError("Failed to refresh from HA: " + err.message));
+    }, 2000);
+  }
+
   /* ---------- WebSocket ---------- */
 
   function send(msg) {
@@ -523,6 +608,11 @@
         return;
       }
       case "event": {
+        const evType = msg.event && msg.event.event_type;
+        if (evType && evType !== "state_changed") {
+          if (cfg.mirror) scheduleResync();
+          return;
+        }
         const data = msg.event && msg.event.data;
         if (!data || !tiles.has(data.entity_id)) return;
         if (eventsDuringSnapshot) eventsDuringSnapshot.set(data.entity_id, data.new_state);
@@ -538,7 +628,19 @@
     try {
       // Subscribe first so no change slips between the snapshot and the stream.
       await send({ type: "subscribe_events", event_type: "state_changed" });
+      if (cfg.mirror) {
+        for (const t of REGISTRY_EVENTS) await send({ type: "subscribe_events", event_type: t });
+      }
+      await loadSnapshot();
+    } catch (err) {
+      showError("Failed to load states: " + err.message);
+    }
+  }
+
+  async function loadSnapshot() {
+    try {
       eventsDuringSnapshot = new Map();
+      if (cfg.mirror) buildTiles(await mirrorTiles());
       const all = await send({ type: "get_states" });
       // Rebuild from the snapshot so entities removed from HA don't linger
       // across reconnects, then replay anything newer than the snapshot.
@@ -551,13 +653,11 @@
       renderAll();
       const missing = [...tiles.keys()].filter((id) => !states.has(id));
       if (missing.length) toast("Not found in HA: " + missing.join(", "));
-    } catch (err) {
-      showError("Failed to load states: " + err.message);
     } finally {
       eventsDuringSnapshot = null;
     }
   }
 
-  buildTiles();
+  buildTiles(cfg.mirror ? [] : cfg.tiles);
   connect();
 })();
