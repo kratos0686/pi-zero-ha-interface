@@ -257,3 +257,38 @@ h1 { margin: 0; font-size: 1.4rem; font-weight: 600; }
   text-shadow: 0 1px 3px #000;
 }
 #sec-bar { cursor: pointer; }
+
+/* Person / Motion badge on camera tiles and the Security grid. */
+.tile.camera .tile-main, .sec-cell { position: relative; }
+.cam-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.cam-badge[hidden] { display: none; }
+.cam-badge.person { background: #cd2b31; }
+.cam-badge.motion { background: #a9821a; }
+
+/* Screensaver: the art, dimmed, with a big clock. */
+.saver {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 7vh;
+  color: #e6f4f3;
+  text-shadow: 0 2px 10px #000;
+  background: linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)), url("bg.jpg") center / cover no-repeat, #05090b;
+}
+.saver[hidden] { display: none; }
+.saver-time { font-size: 18vh; font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; }
+.saver-date { font-size: 4vh; margin-top: 1vh; }

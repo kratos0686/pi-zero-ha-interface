@@ -38,6 +38,7 @@
   const ON_STATES = new Set(["on", "open", "opening", "unlocked", "playing", "home", "heat", "cool", "heat_cool", "auto"]);
 
   const tiles = new Map(); // entity_id -> { tile, el, parts }
+  const badgeOwner = new Map(); // badge binary_sensor -> camera entity_id
   const states = new Map(); // entity_id -> HA state object
   let ws = null;
   let msgId = 0;
@@ -94,6 +95,7 @@
     grid.textContent = "";
     tiles.clear();
     cameras.length = 0;
+    badgeOwner.clear();
     let securityAdded = false;
     for (const tile of list) {
       if (tile.heading) {
@@ -132,8 +134,16 @@
         parts.img = el("img", "cam-img");
         parts.img.alt = "";
         parts.img.decoding = "async";
-        body.append(parts.img);
-        cameras.push({ tile, parts, busy: false, last: 0 });
+        parts.badge = el("div", "cam-badge");
+        parts.badge.hidden = true;
+        body.append(parts.img, parts.badge);
+        // Frigate's per-camera sensors drive a Person / Motion badge.
+        const slug = tile.entity.split(".")[1];
+        const cam = { tile, parts, busy: false, last: 0,
+          person: "binary_sensor." + slug + "_person_occupancy", motion: "binary_sensor." + slug + "_motion" };
+        badgeOwner.set(cam.person, tile.entity);
+        badgeOwner.set(cam.motion, tile.entity);
+        cameras.push(cam);
       } else {
         body.append(parts.icon);
       }
@@ -280,6 +290,18 @@
       }
     }
 
+    if (parts.badge) {
+      const cam = cameras.find((c) => c.tile === tile);
+      const isOn = (id) => { const b = states.get(id); return !!b && b.state === "on"; };
+      const kind = cam && isOn(cam.person) ? "person" : cam && isOn(cam.motion) ? "motion" : "";
+      for (const b of [parts.badge, cam && cam.secBadge]) {
+        if (!b) continue;
+        b.hidden = !kind;
+        b.className = "cam-badge " + kind;
+        b.textContent = kind === "person" ? "Person" : "Motion";
+      }
+    }
+
     if (parts.img && s && s.attributes.access_token &&
         parts.img.dataset.token !== s.attributes.access_token) {
       parts.img.dataset.token = s.attributes.access_token;
@@ -415,7 +437,7 @@
   // Snapshots through HA's camera proxy. One request per camera at a time,
   // and nothing while the live view is up, to spare the Zero's CPU.
   function refreshCamera(cam, force) {
-    if (!cam || cam.busy || liveOpen || secOpen || document.hidden) return;
+    if (!cam || cam.busy || liveOpen || secOpen || saverOn || document.hidden) return;
     const period = (Number(cam.tile.refresh) || 10) * 1000;
     if (!force && Date.now() - cam.last < period) return;
     const token = camToken(cam.tile.entity);
@@ -474,7 +496,9 @@
       img.alt = "";
       if (cam.parts.img.src) img.src = cam.parts.img.src;
       const st = states.get(cam.tile.entity);
-      cell.append(img, el("span", null, cam.tile.name || (st && st.attributes.friendly_name) || cam.tile.entity));
+      cam.secBadge = el("div", "cam-badge");
+      cam.secBadge.hidden = true;
+      cell.append(img, el("span", null, cam.tile.name || (st && st.attributes.friendly_name) || cam.tile.entity), cam.secBadge);
       cell.addEventListener("click", (e) => {
         e.stopPropagation();
         const cur = states.get(cam.tile.entity);
@@ -483,6 +507,7 @@
       });
       cam.secImg = img;
       grid.append(cell);
+      render(cam.tile.entity);
     }
     secOpen = true;
     $("sec").hidden = false;
@@ -513,9 +538,45 @@
     clearTimeout(secAuto);
     $("sec").hidden = true;
     $("sec-grid").textContent = "";
-    for (const cam of cameras) cam.secImg = null;
+    for (const cam of cameras) { cam.secImg = null; cam.secBadge = null; }
   }
   $("sec-bar").addEventListener("click", closeSecurity);
+
+  /* ---------- Screensaver ---------- */
+
+  // After 3 idle minutes show the art with a big clock and stop fetching
+  // camera snapshots. The first tap only wakes the screen; it can't hit a tile.
+  const IDLE_MS = 3 * 60 * 1000;
+  let saverOn = false;
+  let idleTimer = null;
+  function resetIdle() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(startSaver, IDLE_MS);
+  }
+  function tickSaver() {
+    const d = new Date();
+    $("saver-time").textContent = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("saver-date").textContent = d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  }
+  function startSaver() {
+    if (liveOpen || secOpen) { resetIdle(); return; } // someone is watching a camera
+    saverOn = true;
+    tickSaver();
+    $("saver").hidden = false;
+  }
+  setInterval(() => { if (saverOn) tickSaver(); }, 15000);
+  $("saver").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); });
+  $("saver").addEventListener("click", (e) => {
+    e.stopPropagation();
+    saverOn = false;
+    $("saver").hidden = true;
+    resetIdle();
+    for (const c of cameras) refreshCamera(c, true);
+  });
+  for (const ev of ["pointerdown", "keydown"]) {
+    document.addEventListener(ev, () => { if (!saverOn) resetIdle(); }, true);
+  }
+  resetIdle();
 
   /* ---------- Mirror Home Assistant ---------- */
 
@@ -691,11 +752,14 @@
           return;
         }
         const data = msg.event && msg.event.data;
-        if (!data || !tiles.has(data.entity_id)) return;
+        if (!data) return;
+        const owner = badgeOwner.get(data.entity_id);
+        if (!tiles.has(data.entity_id) && !owner) return;
         if (eventsDuringSnapshot) eventsDuringSnapshot.set(data.entity_id, data.new_state);
         if (data.new_state) states.set(data.entity_id, data.new_state);
         else states.delete(data.entity_id);
-        render(data.entity_id);
+        if (tiles.has(data.entity_id)) render(data.entity_id);
+        if (owner) render(owner);
         return;
       }
     }
@@ -722,7 +786,7 @@
       // Rebuild from the snapshot so entities removed from HA don't linger
       // across reconnects, then replay anything newer than the snapshot.
       states.clear();
-      for (const s of all) if (tiles.has(s.entity_id)) states.set(s.entity_id, s);
+      for (const s of all) if (tiles.has(s.entity_id) || badgeOwner.has(s.entity_id)) states.set(s.entity_id, s);
       for (const [id, s] of eventsDuringSnapshot) {
         if (s) states.set(id, s);
         else states.delete(id);
