@@ -41,8 +41,8 @@ echo "==> Installing to $INSTALL_DIR (service user: $RUN_USER)"
 mkdir -p "$INSTALL_DIR"
 # Replace static/ wholesale so files removed upstream aren't served anymore.
 rm -rf "$INSTALL_DIR/static"
-cp -r "$SRC_DIR/server.py" "$SRC_DIR/kiosk.sh" "$SRC_DIR/static" "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/server.py" "$INSTALL_DIR/kiosk.sh"
+cp -r "$SRC_DIR/server.py" "$SRC_DIR/kiosk.sh" "$SRC_DIR/watchdog.sh" "$SRC_DIR/static" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/server.py" "$INSTALL_DIR/kiosk.sh" "$INSTALL_DIR/watchdog.sh"
 
 if [ ! -f "$INSTALL_DIR/config.json" ]; then
   cp "$SRC_DIR/config.example.json" "$INSTALL_DIR/config.json"
@@ -88,7 +88,11 @@ if [ "$KIOSK" -eq 1 ]; then
   done
 
   install_unit ha-kiosk.service
+  # Restarts the kiosk if it sits without a Home Assistant connection.
+  install_unit ha-watchdog.service
+  install_unit ha-watchdog.timer
   systemctl daemon-reload
+  systemctl enable --now ha-watchdog.timer
   # Enable the kiosk before taking tty1 away, so a failure here can't leave
   # the Pi booting to a blank console.
   systemctl enable ha-kiosk.service
@@ -104,8 +108,8 @@ if [ "$KIOSK" -eq 1 ]; then
 elif [ -f /etc/systemd/system/ha-kiosk.service ]; then
   # Switching an existing kiosk install to server-only: undo the kiosk setup.
   echo "==> Disabling the kiosk from an earlier install"
-  systemctl disable --now ha-kiosk.service || true
-  rm -f /etc/systemd/system/ha-kiosk.service
+  systemctl disable --now ha-kiosk.service ha-watchdog.timer || true
+  rm -f /etc/systemd/system/ha-kiosk.service /etc/systemd/system/ha-watchdog.service /etc/systemd/system/ha-watchdog.timer
   systemctl daemon-reload
   systemctl enable getty@tty1.service || true
   systemctl start getty@tty1.service || true
