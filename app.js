@@ -462,18 +462,82 @@
     liveOpen = true;
     img.src = cfg.haUrl + "/api/camera_proxy_stream/" + tile.entity + "?token=" + encodeURIComponent(token);
     ov.hidden = false;
+    setupPtz(tile);
+    keepLiveOpen();
+  }
+  // MJPEG decoding is heavy on a Zero 2W: close by itself after 3 idle minutes.
+  function keepLiveOpen() {
     clearTimeout(liveTimer);
-    // MJPEG decoding is heavy on a Zero 2W: close by itself after 3 minutes.
     liveTimer = setTimeout(closeLive, 180000);
   }
   function closeLive() {
     clearTimeout(liveTimer);
+    if (ptzMoving) ptzStop();
     const img = $("live-img");
     img.removeAttribute("src"); // aborts the MJPEG stream
     $("live").hidden = true;
     liveOpen = false;
   }
   $("live").addEventListener("click", closeLive);
+
+  /* ---------- Pan / tilt (Frigate PTZ) in the live view ---------- */
+
+  // Tiles with "ptz": true get a direction pad; hold a direction to keep
+  // moving, release to stop. "presets": [...] adds buttons for saved views.
+  let ptzTile = null;
+  let ptzMoving = false;
+  let ptzStart = 0;
+  let ptzStopTimer = null;
+  function ptzCall(data) {
+    if (!ptzTile) return Promise.resolve();
+    return callService("frigate", "ptz", ptzTile.entity, data).catch(() => {});
+  }
+  function ptzStop() {
+    ptzMoving = false;
+    ptzCall({ action: "stop" });
+  }
+  function setupPtz(tile) {
+    ptzTile = tile.ptz ? tile : null;
+    $("ptz").hidden = !ptzTile;
+    const box = $("ptz-presets");
+    box.textContent = "";
+    for (const name of (ptzTile && tile.presets) || []) {
+      const b = el("button", null, name.replace(/^viewpoint /i, "View "));
+      b.type = "button";
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        keepLiveOpen();
+        ptzCall({ action: "preset", argument: name });
+      });
+      box.append(b);
+    }
+  }
+  for (const id of ["ptz", "ptz-presets"]) {
+    $(id).addEventListener("click", (e) => e.stopPropagation());
+  }
+  for (const b of document.querySelectorAll("#ptz [data-dir]")) {
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!ptzTile) return;
+      if (b.setPointerCapture) b.setPointerCapture(e.pointerId);
+      clearTimeout(ptzStopTimer);
+      ptzMoving = true;
+      ptzStart = Date.now();
+      b.classList.add("held");
+      keepLiveOpen();
+      ptzCall({ action: "move", argument: b.dataset.dir });
+    });
+    const release = (e) => {
+      e.stopPropagation();
+      b.classList.remove("held");
+      if (!ptzMoving) return;
+      ptzMoving = false;
+      // A quick tap still nudges the camera a little before stopping.
+      ptzStopTimer = setTimeout(() => ptzCall({ action: "stop" }), Math.max(0, 400 - (Date.now() - ptzStart)));
+    };
+    for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) b.addEventListener(ev, release);
+  }
 
   /* ---------- Security view: every camera, filling the screen ---------- */
 

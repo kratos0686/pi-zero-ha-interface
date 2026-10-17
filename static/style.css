@@ -292,3 +292,39 @@ h1 { margin: 0; font-size: 1.4rem; font-weight: 600; }
 .saver[hidden] { display: none; }
 .saver-time { font-size: 18vh; font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; }
 .saver-date { font-size: 4vh; margin-top: 1vh; }
+
+/* Pan / tilt pad and preset buttons over the live view. */
+.live { position: fixed; }
+.ptz {
+  position: absolute;
+  right: 20px;
+  bottom: 56px;
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  grid-template-rows: repeat(3, 64px);
+  grid-template-areas: ". up ." "left . right" ". down .";
+  gap: 6px;
+}
+.ptz[hidden] { display: none; }
+.ptz .up { grid-area: up; }
+.ptz .left { grid-area: left; }
+.ptz .right { grid-area: right; }
+.ptz .down { grid-area: down; }
+.ptz button, .ptz-presets button {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 1.4rem;
+  border-radius: 50%;
+  touch-action: none;
+}
+.ptz button.held { background: rgba(79, 209, 197, 0.6); }
+.ptz-presets {
+  position: absolute;
+  left: 20px;
+  bottom: 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ptz-presets button { border-radius: 999px; font-size: 1rem; padding: 10px 16px; }
