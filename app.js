@@ -842,24 +842,35 @@
     }
   }
 
-  async function loadSnapshot() {
+  // Snapshots run one at a time: a registry-change resync that overlapped the
+  // initial load used to clear the shared replay buffer under it
+  // ("eventsDuringSnapshot is not iterable").
+  let snapshotChain = Promise.resolve();
+  function loadSnapshot() {
+    snapshotChain = snapshotChain.catch(() => {}).then(takeSnapshot);
+    return snapshotChain;
+  }
+
+  async function takeSnapshot() {
+    const replay = new Map();
+    eventsDuringSnapshot = replay;
     try {
-      eventsDuringSnapshot = new Map();
       if (cfg.mirror) buildTiles(await mirrorTiles());
       const all = await send({ type: "get_states" });
       // Rebuild from the snapshot so entities removed from HA don't linger
       // across reconnects, then replay anything newer than the snapshot.
       states.clear();
       for (const s of all) if (tiles.has(s.entity_id) || badgeOwner.has(s.entity_id)) states.set(s.entity_id, s);
-      for (const [id, s] of eventsDuringSnapshot) {
+      for (const [id, s] of replay) {
         if (s) states.set(id, s);
         else states.delete(id);
       }
       renderAll();
+      showError("");
       const missing = [...tiles.keys()].filter((id) => !states.has(id));
       if (missing.length) toast("Not found in HA: " + missing.join(", "));
     } finally {
-      eventsDuringSnapshot = null;
+      if (eventsDuringSnapshot === replay) eventsDuringSnapshot = null;
     }
   }
 
