@@ -29,14 +29,16 @@
     light: "💡", switch: "🔌", fan: "🌀", cover: "🚪", lock: "🔒",
     scene: "🎬", script: "📜", climate: "🌡️", sensor: "📈",
     binary_sensor: "⚪", input_boolean: "✅", automation: "🤖",
-    button: "🔘", media_player: "🎵", person: "👤", vacuum: "🧹",
+    button: "🔘", media_player: "🎵", camera: "📷", person: "👤", vacuum: "🧹",
   };
   const TOGGLE_DOMAINS = new Set(["light", "switch", "fan", "input_boolean", "automation", "media_player"]);
   // Domains where an accidental tap matters: require a second tap to confirm.
-  const CONFIRM_DOMAINS = new Set(["lock", "cover"]);
+  const CONFIRM_DOMAINS = new Set(["lock"]);
+  // Covers get explicit Open / Stop / Close buttons instead of a tile tap.
   const ON_STATES = new Set(["on", "open", "opening", "unlocked", "playing", "home", "heat", "cool", "heat_cool", "auto"]);
 
   const tiles = new Map(); // entity_id -> { tile, el, parts }
+  const badgeOwner = new Map(); // badge binary_sensor -> camera entity_id
   const states = new Map(); // entity_id -> HA state object
   let ws = null;
   let msgId = 0;
@@ -88,10 +90,29 @@
     return e;
   }
 
-  function buildTiles() {
+  function buildTiles(list) {
     const grid = $("grid");
     grid.textContent = "";
-    for (const tile of cfg.tiles) {
+    tiles.clear();
+    cameras.length = 0;
+    badgeOwner.clear();
+    let securityAdded = false;
+    for (const tile of list) {
+      if (tile.heading) {
+        grid.append(el("h2", "area-heading", tile.heading));
+        continue;
+      }
+      // A "Security" tile in front of the first camera opens all cameras full screen.
+      if (!securityAdded && tile.entity.startsWith("camera.")) {
+        securityAdded = true;
+        const sec = el("div", "tile actionable security-tile");
+        const main = el("button", "tile-main");
+        main.type = "button";
+        main.append(el("div", "icon", "🛡️"), el("div", "name", "Security"), el("div", "state", "All cameras"));
+        sec.append(main);
+        sec.addEventListener("click", openSecurity);
+        grid.append(sec);
+      }
       const domain = tile.entity.split(".")[0];
       const root = el("div", "tile unavailable");
       const parts = {
@@ -108,7 +129,24 @@
         parts.main = body;
         root.append(body);
       }
-      body.append(parts.icon);
+      if (domain === "camera") {
+        root.classList.add("camera");
+        parts.img = el("img", "cam-img");
+        parts.img.alt = "";
+        parts.img.decoding = "async";
+        parts.badge = el("div", "cam-badge");
+        parts.badge.hidden = true;
+        body.append(parts.img, parts.badge);
+        // Frigate's per-camera sensors drive a Person / Motion badge.
+        const slug = tile.entity.split(".")[1];
+        const cam = { tile, parts, busy: false, last: 0,
+          person: "binary_sensor." + slug + "_person_occupancy", motion: "binary_sensor." + slug + "_motion" };
+        badgeOwner.set(cam.person, tile.entity);
+        badgeOwner.set(cam.motion, tile.entity);
+        cameras.push(cam);
+      } else {
+        body.append(parts.icon);
+      }
 
       if (domain === "sensor") {
         parts.value = el("div", "value", "—");
@@ -129,6 +167,23 @@
           callService("light", "turn_on", tile.entity, { brightness_pct: Number(parts.slider.value) }).catch(() => {});
         });
         root.append(parts.slider);
+      }
+
+      if (domain === "cover") {
+        const row = el("div", "cover-controls");
+        for (const [label, svc, aria] of [["▲", "open_cover", "Open"], ["■", "stop_cover", "Stop"], ["▼", "close_cover", "Close"]]) {
+          const btn = el("button", null, label);
+          btn.type = "button";
+          btn.setAttribute("aria-label", aria + " " + (tile.name || tile.entity));
+          stopTap(btn);
+          btn.addEventListener("click", () => {
+            const st = states.get(tile.entity);
+            if (!st || st.state === "unavailable") { toast("Unavailable"); return; }
+            callService("cover", svc, tile.entity).then(() => toast((tile.name || tile.entity) + ": " + aria), () => {});
+          });
+          row.append(btn);
+        }
+        root.append(row);
       }
 
       if (domain === "climate") {
@@ -156,6 +211,7 @@
       tiles.set(tile.entity, { tile, el: root, parts });
       grid.append(root);
     }
+    if (secOpen) openSecurity();
   }
 
   function stopTap(node) {
@@ -164,7 +220,7 @@
   }
 
   function isActionable(domain) {
-    return TOGGLE_DOMAINS.has(domain) || CONFIRM_DOMAINS.has(domain) ||
+    return TOGGLE_DOMAINS.has(domain) || CONFIRM_DOMAINS.has(domain) || domain === "camera" ||
       domain === "scene" || domain === "script" || domain === "button";
   }
 
@@ -172,6 +228,9 @@
     if (!s) return "—";
     const unit = s.attributes.unit_of_measurement;
     const domain = s.entity_id.split(".")[0];
+    if (s.state === "unavailable" || (s.state === "unknown" && domain !== "scene" && domain !== "button")) {
+      return s.state.replace(/^./, (c) => c.toUpperCase());
+    }
     if (domain === "sensor") {
       const n = Number(s.state);
       const val = Number.isFinite(n) && s.state.trim() !== "" ? String(Math.round(n * 10) / 10) : s.state;
@@ -179,6 +238,9 @@
     }
     if (domain === "light" && s.state === "on" && s.attributes.brightness != null) {
       return "On · " + Math.round((s.attributes.brightness / 255) * 100) + "%";
+    }
+    if (domain === "cover" && s.attributes.current_position != null) {
+      return s.state.replace(/^./, (c) => c.toUpperCase()) + " · " + s.attributes.current_position + "%";
     }
     if (domain === "climate") {
       const cur = s.attributes.current_temperature;
@@ -202,9 +264,12 @@
 
     root.classList.remove("pending");
     root.classList.toggle("unavailable", unavailable);
-    root.classList.toggle("on", !!s && ON_STATES.has(s.state));
+    const isOn = !!s && (domain === "media_player"
+      ? !["off", "standby", "unavailable", "unknown"].includes(s.state)
+      : ON_STATES.has(s.state));
+    root.classList.toggle("on", isOn);
     if (parts.main && TOGGLE_DOMAINS.has(domain)) {
-      parts.main.setAttribute("aria-pressed", String(!!s && ON_STATES.has(s.state)));
+      parts.main.setAttribute("aria-pressed", String(isOn));
     }
 
     if (!tile.name && s && s.attributes.friendly_name) parts.name.textContent = s.attributes.friendly_name;
@@ -223,6 +288,24 @@
       if (on && s.attributes.brightness != null && document.activeElement !== parts.slider) {
         parts.slider.value = String(Math.max(1, Math.round((s.attributes.brightness / 255) * 100)));
       }
+    }
+
+    if (parts.badge) {
+      const cam = cameras.find((c) => c.tile === tile);
+      const isOn = (id) => { const b = states.get(id); return !!b && b.state === "on"; };
+      const kind = cam && isOn(cam.person) ? "person" : cam && isOn(cam.motion) ? "motion" : "";
+      for (const b of [parts.badge, cam && cam.secBadge]) {
+        if (!b) continue;
+        b.hidden = !kind;
+        b.className = "cam-badge " + kind;
+        b.textContent = kind === "person" ? "Person" : "Motion";
+      }
+    }
+
+    if (parts.img && s && s.attributes.access_token &&
+        parts.img.dataset.token !== s.attributes.access_token) {
+      parts.img.dataset.token = s.attributes.access_token;
+      refreshCamera(cameras.find((c) => c.tile === tile), true);
     }
 
     if (parts.target) {
@@ -259,6 +342,10 @@
     const stateless = domain === "scene" || domain === "button";
     if (!s || s.state === "unavailable" || (s.state === "unknown" && !stateless)) {
       toast("Unavailable");
+      return;
+    }
+    if (domain === "camera") {
+      openLive(tile, s);
       return;
     }
     // A second tap before HA answers would send a second toggle and could
@@ -302,7 +389,7 @@
       case "cover": return state === "closed" || state === "closing" ? "open_cover" : "close_cover";
       case "scene": case "script": return "turn_on";
       case "button": return "press";
-      case "media_player": return "media_play_pause";
+      case "media_player": return "toggle"; // power on/off; play/pause fails on an idle Cast device
       default: return "toggle";
     }
   }
@@ -335,6 +422,303 @@
         render(entityId);
       }
     });
+  }
+
+  /* ---------- Cameras ---------- */
+
+  const cameras = []; // { tile, parts, busy, last }
+  let liveOpen = false;
+
+  function camToken(entityId) {
+    const s = states.get(entityId);
+    return s && s.state !== "unavailable" ? s.attributes.access_token : null;
+  }
+
+  // Snapshots through HA's camera proxy. One request per camera at a time,
+  // and nothing while the live view is up, to spare the Zero's CPU.
+  function refreshCamera(cam, force) {
+    if (!cam || cam.busy || liveOpen || secOpen || saverOn || document.hidden) return;
+    const period = (Number(cam.tile.refresh) || 10) * 1000;
+    if (!force && Date.now() - cam.last < period) return;
+    const token = camToken(cam.tile.entity);
+    if (!token) return;
+    cam.busy = true;
+    cam.last = Date.now();
+    const img = new Image();
+    img.onload = () => { cam.parts.img.src = img.src; cam.busy = false; };
+    img.onerror = () => { cam.busy = false; };
+    img.src = cfg.haUrl + "/api/camera_proxy/" + cam.tile.entity +
+      "?token=" + encodeURIComponent(token) + "&_=" + Date.now();
+  }
+  setInterval(() => { for (const c of cameras) refreshCamera(c); }, 1000);
+
+  let liveTimer = null;
+  function openLive(tile, s) {
+    const token = s.attributes.access_token;
+    if (!token) { toast("No camera token yet"); return; }
+    const ov = $("live");
+    const img = $("live-img");
+    $("live-name").textContent = tile.name || s.attributes.friendly_name || tile.entity;
+    liveOpen = true;
+    img.src = cfg.haUrl + "/api/camera_proxy_stream/" + tile.entity + "?token=" + encodeURIComponent(token);
+    ov.hidden = false;
+    setupPtz(tile);
+    keepLiveOpen();
+  }
+  // MJPEG decoding is heavy on a Zero 2W: close by itself after 3 idle minutes.
+  function keepLiveOpen() {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(closeLive, 180000);
+  }
+  function closeLive() {
+    clearTimeout(liveTimer);
+    if (ptzMoving) ptzStop();
+    const img = $("live-img");
+    img.removeAttribute("src"); // aborts the MJPEG stream
+    $("live").hidden = true;
+    liveOpen = false;
+  }
+  $("live").addEventListener("click", closeLive);
+
+  /* ---------- Pan / tilt (Frigate PTZ) in the live view ---------- */
+
+  // Tiles with "ptz": true get a direction pad; hold a direction to keep
+  // moving, release to stop. "presets": [...] adds buttons for saved views.
+  let ptzTile = null;
+  let ptzMoving = false;
+  let ptzStart = 0;
+  let ptzStopTimer = null;
+  function ptzCall(data) {
+    if (!ptzTile) return Promise.resolve();
+    return callService("frigate", "ptz", ptzTile.entity, data).catch(() => {});
+  }
+  function ptzStop() {
+    ptzMoving = false;
+    ptzCall({ action: "stop" });
+  }
+  function setupPtz(tile) {
+    ptzTile = tile.ptz ? tile : null;
+    $("ptz").hidden = !ptzTile;
+    const box = $("ptz-presets");
+    box.textContent = "";
+    for (const name of (ptzTile && tile.presets) || []) {
+      const b = el("button", null, name.replace(/^viewpoint /i, "View "));
+      b.type = "button";
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        keepLiveOpen();
+        ptzCall({ action: "preset", argument: name });
+      });
+      box.append(b);
+    }
+  }
+  for (const id of ["ptz", "ptz-presets"]) {
+    $(id).addEventListener("click", (e) => e.stopPropagation());
+  }
+  for (const b of document.querySelectorAll("#ptz [data-dir]")) {
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!ptzTile) return;
+      if (b.setPointerCapture) b.setPointerCapture(e.pointerId);
+      clearTimeout(ptzStopTimer);
+      ptzMoving = true;
+      ptzStart = Date.now();
+      b.classList.add("held");
+      keepLiveOpen();
+      ptzCall({ action: "move", argument: b.dataset.dir });
+    });
+    const release = (e) => {
+      e.stopPropagation();
+      b.classList.remove("held");
+      if (!ptzMoving) return;
+      ptzMoving = false;
+      // A quick tap still nudges the camera a little before stopping.
+      ptzStopTimer = setTimeout(() => ptzCall({ action: "stop" }), Math.max(0, 400 - (Date.now() - ptzStart)));
+    };
+    for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) b.addEventListener(ev, release);
+  }
+
+  /* ---------- Security view: every camera, filling the screen ---------- */
+
+  let secOpen = false;
+  let secTimer = null;
+  let secAuto = null;
+  let secIdx = 0;
+
+  function openSecurity() {
+    const n = cameras.length;
+    if (!n) { toast("No cameras"); return; }
+    const grid = $("sec-grid");
+    grid.textContent = "";
+    const cols = Math.ceil(Math.sqrt(n));
+    grid.style.gridTemplateColumns = "repeat(" + cols + ", 1fr)";
+    grid.style.gridTemplateRows = "repeat(" + Math.ceil(n / cols) + ", 1fr)";
+    for (const cam of cameras) {
+      const cell = el("div", "sec-cell");
+      const img = el("img");
+      img.alt = "";
+      if (cam.parts.img.src) img.src = cam.parts.img.src;
+      const st = states.get(cam.tile.entity);
+      cam.secBadge = el("div", "cam-badge");
+      cam.secBadge.hidden = true;
+      cell.append(img, el("span", null, cam.tile.name || (st && st.attributes.friendly_name) || cam.tile.entity), cam.secBadge);
+      cell.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const cur = states.get(cam.tile.entity);
+        if (cur && cur.state !== "unavailable") openLive(cam.tile, cur);
+        else toast("Unavailable");
+      });
+      cam.secImg = img;
+      grid.append(cell);
+      render(cam.tile.entity);
+    }
+    secOpen = true;
+    $("sec").hidden = false;
+    clearInterval(secTimer);
+    // One snapshot request at a time, round-robin: each camera refreshes
+    // every (cameras x 0.8 s), which the Zero 2W can keep up with.
+    secTimer = setInterval(secTick, 800);
+    clearTimeout(secAuto);
+    secAuto = setTimeout(closeSecurity, 10 * 60 * 1000);
+  }
+
+  function secTick() {
+    if (!secOpen || liveOpen || document.hidden || !cameras.length) return;
+    const cam = cameras[secIdx++ % cameras.length];
+    const token = camToken(cam.tile.entity);
+    if (cam.secBusy || !token || !cam.secImg) return;
+    cam.secBusy = true;
+    const img = new Image();
+    img.onload = () => { if (cam.secImg) cam.secImg.src = img.src; cam.secBusy = false; };
+    img.onerror = () => { cam.secBusy = false; };
+    img.src = cfg.haUrl + "/api/camera_proxy/" + cam.tile.entity +
+      "?token=" + encodeURIComponent(token) + "&_=" + Date.now();
+  }
+
+  function closeSecurity() {
+    secOpen = false;
+    clearInterval(secTimer);
+    clearTimeout(secAuto);
+    $("sec").hidden = true;
+    $("sec-grid").textContent = "";
+    for (const cam of cameras) { cam.secImg = null; cam.secBadge = null; }
+  }
+  $("sec-bar").addEventListener("click", closeSecurity);
+
+  /* ---------- Screensaver ---------- */
+
+  // After 3 idle minutes show the art with a big clock and stop fetching
+  // camera snapshots. The first tap only wakes the screen; it can't hit a tile.
+  const IDLE_MS = 3 * 60 * 1000;
+  let saverOn = false;
+  let idleTimer = null;
+  function resetIdle() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(startSaver, IDLE_MS);
+  }
+  function tickSaver() {
+    const d = new Date();
+    $("saver-time").textContent = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("saver-date").textContent = d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  }
+  function startSaver() {
+    if (liveOpen || secOpen) { resetIdle(); return; } // someone is watching a camera
+    saverOn = true;
+    tickSaver();
+    $("saver").hidden = false;
+  }
+  setInterval(() => { if (saverOn) tickSaver(); }, 15000);
+  $("saver").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); });
+  $("saver").addEventListener("click", (e) => {
+    e.stopPropagation();
+    saverOn = false;
+    $("saver").hidden = true;
+    resetIdle();
+    for (const c of cameras) refreshCamera(c, true);
+  });
+  for (const ev of ["pointerdown", "keydown"]) {
+    document.addEventListener(ev, () => { if (!saverOn) resetIdle(); }, true);
+  }
+  resetIdle();
+
+  /* ---------- Mirror Home Assistant ---------- */
+
+  // With "mirror" set, tiles come from HA instead of config.json: every
+  // entity, grouped by area like HA's auto-generated Overview dashboard, or
+  // the entities of a saved dashboard when "mirror" names one. config.json
+  // tiles then only override names/icons, and "exclude" hides entities.
+  const MIRROR_DOMAINS = ["camera", "light", "switch", "fan", "cover", "climate", "media_player",
+    "lock", "vacuum", "scene", "script", "button", "input_boolean", "binary_sensor", "sensor"];
+  const REGISTRY_EVENTS = ["entity_registry_updated", "device_registry_updated",
+    "area_registry_updated", "lovelace_updated"];
+  const excludeRes = (cfg.exclude || []).map((p) =>
+    new RegExp("^" + p.split("*").map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$"));
+  const overrides = new Map((cfg.tiles || []).map((t) => [t.entity, t]));
+
+  function excluded(id) { return excludeRes.some((re) => re.test(id)); }
+
+  function collectEntities(node, out) {
+    if (Array.isArray(node)) {
+      for (const n of node) {
+        if (typeof n === "string" && /^[a-z_]+\.[a-z0-9_]+$/.test(n)) out.push(n);
+        else collectEntities(n, out);
+      }
+    } else if (node && typeof node === "object") {
+      if (typeof node.entity === "string") out.push(node.entity);
+      for (const v of Object.values(node)) if (v && typeof v === "object") collectEntities(v, out);
+    }
+    return out;
+  }
+
+  async function mirrorTiles() {
+    const withOverrides = (id) => Object.assign({ entity: id }, overrides.get(id));
+    if (typeof cfg.mirror === "string") {
+      try {
+        const lv = await send({ type: "lovelace/config", url_path: cfg.mirror === "default" ? null : cfg.mirror });
+        const ids = [...new Set(collectEntities(lv, []))].filter((id) => !excluded(id));
+        if (ids.length) return ids.map(withOverrides);
+      } catch (_) { /* no saved dashboard: fall back to the auto layout */ }
+    }
+    const [ents, devs, areas, all] = await Promise.all([
+      send({ type: "config/entity_registry/list" }),
+      send({ type: "config/device_registry/list" }),
+      send({ type: "config/area_registry/list" }),
+      send({ type: "get_states" }),
+    ]);
+    const reg = new Map(ents.map((e) => [e.entity_id, e]));
+    const devArea = new Map(devs.map((d) => [d.id, d.area_id]));
+    const groups = new Map();
+    for (const st of all) {
+      const id = st.entity_id;
+      const rank = MIRROR_DOMAINS.indexOf(id.split(".")[0]);
+      if (rank < 0 || excluded(id)) continue;
+      const r = reg.get(id);
+      // Same rule as HA's Overview: skip config/diagnostic, hidden and disabled entities.
+      if (r && (r.entity_category || r.hidden_by || r.disabled_by)) continue;
+      let area = (r && (r.area_id || devArea.get(r.device_id))) || "";
+      if (!area && rank === 0) area = "\u0000cameras"; // area-less cameras get their own section on top
+      if (!groups.has(area)) groups.set(area, []);
+      groups.get(area).push({ id, rank, label: String(st.attributes.friendly_name || id).toLowerCase() });
+    }
+    const list = [];
+    for (const a of ["\u0000cameras", ...areas.map((x) => x.area_id), ""]) {
+      const g = groups.get(a);
+      if (!g || !g.length) continue;
+      g.sort((x, y) => x.rank - y.rank || x.label.localeCompare(y.label));
+      const heading = a === "\u0000cameras" ? "Cameras" : a ? (areas.find((x) => x.area_id === a) || {}).name || a : "Other";
+      list.push({ heading });
+      for (const t of g) list.push(withOverrides(t.id));
+    }
+    return list;
+  }
+
+  let resyncTimer = null;
+  function scheduleResync() {
+    clearTimeout(resyncTimer);
+    resyncTimer = setTimeout(() => {
+      loadSnapshot().catch((err) => showError("Failed to refresh from HA: " + err.message));
+    }, 2000);
   }
 
   /* ---------- WebSocket ---------- */
@@ -426,12 +810,20 @@
         return;
       }
       case "event": {
+        const evType = msg.event && msg.event.event_type;
+        if (evType && evType !== "state_changed") {
+          if (cfg.mirror) scheduleResync();
+          return;
+        }
         const data = msg.event && msg.event.data;
-        if (!data || !tiles.has(data.entity_id)) return;
+        if (!data) return;
+        const owner = badgeOwner.get(data.entity_id);
+        if (!tiles.has(data.entity_id) && !owner) return;
         if (eventsDuringSnapshot) eventsDuringSnapshot.set(data.entity_id, data.new_state);
         if (data.new_state) states.set(data.entity_id, data.new_state);
         else states.delete(data.entity_id);
-        render(data.entity_id);
+        if (tiles.has(data.entity_id)) render(data.entity_id);
+        if (owner) render(owner);
         return;
       }
     }
@@ -441,26 +833,47 @@
     try {
       // Subscribe first so no change slips between the snapshot and the stream.
       await send({ type: "subscribe_events", event_type: "state_changed" });
-      eventsDuringSnapshot = new Map();
+      if (cfg.mirror) {
+        for (const t of REGISTRY_EVENTS) await send({ type: "subscribe_events", event_type: t });
+      }
+      await loadSnapshot();
+    } catch (err) {
+      showError("Failed to load states: " + err.message);
+    }
+  }
+
+  // Snapshots run one at a time: a registry-change resync that overlapped the
+  // initial load used to clear the shared replay buffer under it
+  // ("eventsDuringSnapshot is not iterable").
+  let snapshotChain = Promise.resolve();
+  function loadSnapshot() {
+    snapshotChain = snapshotChain.catch(() => {}).then(takeSnapshot);
+    return snapshotChain;
+  }
+
+  async function takeSnapshot() {
+    const replay = new Map();
+    eventsDuringSnapshot = replay;
+    try {
+      if (cfg.mirror) buildTiles(await mirrorTiles());
       const all = await send({ type: "get_states" });
       // Rebuild from the snapshot so entities removed from HA don't linger
       // across reconnects, then replay anything newer than the snapshot.
       states.clear();
-      for (const s of all) if (tiles.has(s.entity_id)) states.set(s.entity_id, s);
-      for (const [id, s] of eventsDuringSnapshot) {
+      for (const s of all) if (tiles.has(s.entity_id) || badgeOwner.has(s.entity_id)) states.set(s.entity_id, s);
+      for (const [id, s] of replay) {
         if (s) states.set(id, s);
         else states.delete(id);
       }
       renderAll();
+      showError("");
       const missing = [...tiles.keys()].filter((id) => !states.has(id));
       if (missing.length) toast("Not found in HA: " + missing.join(", "));
-    } catch (err) {
-      showError("Failed to load states: " + err.message);
     } finally {
-      eventsDuringSnapshot = null;
+      if (eventsDuringSnapshot === replay) eventsDuringSnapshot = null;
     }
   }
 
-  buildTiles();
+  buildTiles(cfg.mirror ? [] : cfg.tiles);
   connect();
 })();

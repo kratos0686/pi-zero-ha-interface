@@ -21,7 +21,7 @@ only a thin client on the Pi:
 - **Tiles** for lights (tap to toggle, with a brightness slider), switches, fans,
   input booleans, automations, media players (play/pause), scenes, scripts,
   buttons, climate (± target temperature), sensors and binary sensors.
-- **Locks and covers need two taps**, so an accidental tap can't unlock the door or open the garage.
+- **Locks need two taps**, so an accidental tap can't unlock the door. Covers get Open / Stop / Close buttons.
 - Light/dark theme and a clock in the header.
 
 ## Setup
@@ -58,6 +58,10 @@ updated files and restarts both services.
 | `title`  | Header text                                                                  |
 | `theme`  | `auto`, `light` or `dark`                                                    |
 | `tiles`  | List of `{ "entity": "light.kitchen", "name": "...", "icon": "💡" }` or plain entity id strings |
+
+| `mirror` | `true` to mirror Home Assistant: tiles come from HA itself, grouped by area like HA's auto-generated Overview, and update live when you add, rename, move or hide entities in HA. A dashboard `url_path` mirrors that saved dashboard's entities instead. `tiles` then only override names/icons. |
+| tile `ptz` / `presets` | On a camera tile: `"ptz": true` adds a pan/tilt pad to its live view (via Frigate's `frigate.ptz` service; hold a direction to move), and `"presets": ["viewpoint 1"]` adds buttons for saved Frigate presets. |
+| `exclude` | With `mirror`: entity ids or `*` patterns to leave out, e.g. `"sensor.backup_*"` |
 
 The config is re-read on every page load, so after editing it just reload the
 page. On the kiosk you can do that with `sudo systemctl restart ha-kiosk`.

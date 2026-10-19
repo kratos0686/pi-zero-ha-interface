@@ -154,3 +154,177 @@ h1 { margin: 0; font-size: 1.4rem; font-weight: 600; }
   pointer-events: none;
 }
 .error:empty, .toast:empty { padding: 0; margin: 0; background: transparent; }
+
+/* Cameras: wide tiles with a periodically refreshed snapshot. */
+.tile.camera { grid-column: span 2; min-height: 0; padding: 8px; }
+.tile.camera .tile-main { gap: 2px; }
+.cam-img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #000;
+  display: block;
+}
+.tile.camera .name { font-size: 0.9rem; }
+.tile.camera .state { font-size: 0.8rem; }
+
+.live {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+.live[hidden] { display: none; }
+.live img { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
+.live-bar {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 16px;
+  color: #ddd;
+  font-size: 0.9rem;
+}
+
+.cover-controls { display: flex; gap: 6px; margin-top: 8px; }
+.cover-controls button {
+  flex: 1;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1.1rem;
+}
+.cover-controls button:active { transform: scale(0.94); background: var(--card-on); }
+
+/* Background art (static/bg.jpg) with a teal palette to match it.
+   Set "theme": "dark" in config.json for this look. */
+:root[data-theme="dark"] {
+  --bg: #05090b;
+  --card: rgba(10, 18, 22, 0.62);
+  --card-on: rgba(38, 120, 114, 0.6);
+  --text: #e6f4f3;
+  --muted: #a3bfbd;
+  --accent: #4fd1c5;
+}
+:root[data-theme="dark"], :root[data-theme="dark"] body { background: transparent; }
+:root[data-theme="dark"] { background-color: #05090b; }
+/* A fixed layer is sized to the screen and cheap to keep in place on scroll. */
+:root[data-theme="dark"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: url("bg.jpg") center / cover no-repeat;
+}
+:root[data-theme="dark"] header { text-shadow: 0 1px 3px #000; }
+:root[data-theme="dark"] .tile { box-shadow: 0 0 0 1px rgba(79, 209, 197, 0.18); }
+:root[data-theme="dark"] .tile.unavailable { background: rgba(10, 18, 22, 0.55); }
+:root[data-theme="dark"] .cover-controls button,
+:root[data-theme="dark"] .climate-controls button { background: rgba(79, 209, 197, 0.12); }
+
+/* Area headings when mirroring Home Assistant. */
+.area-heading {
+  grid-column: 1 / -1;
+  margin: 10px 2px -2px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* Security view: all cameras in a grid filling the screen. */
+.security-tile .icon { font-size: 2.4rem; }
+.sec {
+  position: fixed;
+  inset: 0;
+  z-index: 9; /* under the single-camera live view */
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+.sec[hidden] { display: none; }
+.sec-grid { flex: 1; min-height: 0; display: grid; gap: 2px; }
+.sec-cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #111; }
+.sec-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sec-cell span {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  color: #fff;
+  font-size: 0.9rem;
+  text-shadow: 0 1px 3px #000;
+}
+#sec-bar { cursor: pointer; }
+
+/* Person / Motion badge on camera tiles and the Security grid. */
+.tile.camera .tile-main, .sec-cell { position: relative; }
+.cam-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.cam-badge[hidden] { display: none; }
+.cam-badge.person { background: #cd2b31; }
+.cam-badge.motion { background: #a9821a; }
+
+/* Screensaver: the art, dimmed, with a big clock. */
+.saver {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 7vh;
+  color: #e6f4f3;
+  text-shadow: 0 2px 10px #000;
+  background: linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)), url("bg.jpg") center / cover no-repeat, #05090b;
+}
+.saver[hidden] { display: none; }
+.saver-time { font-size: 18vh; font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; }
+.saver-date { font-size: 4vh; margin-top: 1vh; }
+
+/* Pan / tilt pad and preset buttons over the live view. */
+.live { position: fixed; }
+.ptz {
+  position: absolute;
+  right: 20px;
+  bottom: 56px;
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  grid-template-rows: repeat(3, 64px);
+  grid-template-areas: ". up ." "left . right" ". down .";
+  gap: 6px;
+}
+.ptz[hidden] { display: none; }
+.ptz .up { grid-area: up; }
+.ptz .left { grid-area: left; }
+.ptz .right { grid-area: right; }
+.ptz .down { grid-area: down; }
+.ptz button, .ptz-presets button {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 1.4rem;
+  border-radius: 50%;
+  touch-action: none;
+}
+.ptz button.held { background: rgba(79, 209, 197, 0.6); }
+.ptz-presets {
+  position: absolute;
+  left: 20px;
+  bottom: 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ptz-presets button { border-radius: 999px; font-size: 1rem; padding: 10px 16px; }
