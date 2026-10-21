@@ -169,6 +169,26 @@
         root.append(parts.slider);
       }
 
+      if (domain === "media_player") {
+        // Now playing: album art behind the tile plus previous / play-pause / next.
+        parts.art = el("img", "media-art");
+        parts.art.alt = "";
+        parts.art.hidden = true;
+        root.prepend(parts.art);
+        const row = el("div", "media-controls");
+        row.hidden = true;
+        for (const [label, svc, aria] of [["⏮", "media_previous_track", "Previous"], ["⏯", "media_play_pause", "Play or pause"], ["⏭", "media_next_track", "Next"]]) {
+          const btn = el("button", null, label);
+          btn.type = "button";
+          btn.setAttribute("aria-label", aria);
+          stopTap(btn);
+          btn.addEventListener("click", () => callService("media_player", svc, tile.entity).catch(() => {}));
+          row.append(btn);
+        }
+        parts.mediaControls = row;
+        root.append(row);
+      }
+
       if (domain === "cover") {
         const row = el("div", "cover-controls");
         for (const [label, svc, aria] of [["▲", "open_cover", "Open"], ["■", "stop_cover", "Stop"], ["▼", "close_cover", "Close"]]) {
@@ -290,6 +310,23 @@
       }
     }
 
+    if (parts.art) {
+      const a = (s && s.attributes) || {};
+      const active = !!s && (s.state === "playing" || s.state === "paused");
+      const pic = active && a.entity_picture ? (a.entity_picture.startsWith("/") ? cfg.haUrl + a.entity_picture : a.entity_picture) : "";
+      if (parts.art.dataset.src !== pic) {
+        parts.art.dataset.src = pic;
+        if (pic) parts.art.src = pic; else parts.art.removeAttribute("src");
+      }
+      parts.art.hidden = !pic;
+      root.classList.toggle("has-art", !!pic);
+      // MediaPlayerEntityFeature: PREVIOUS_TRACK 16, NEXT_TRACK 32.
+      parts.mediaControls.hidden = !(active && ((a.supported_features || 0) & 48));
+      if (active && a.media_title) {
+        parts.state.textContent = a.media_title + (a.media_artist ? " · " + a.media_artist : "");
+      }
+    }
+
     if (parts.badge) {
       const cam = cameras.find((c) => c.tile === tile);
       const isOn = (id) => { const b = states.get(id); return !!b && b.state === "on"; };
@@ -353,6 +390,7 @@
     if (inFlight.has(root)) return;
 
     let service = serviceFor(domain, s.state);
+    if (domain === "media_player" && entityId.startsWith("media_player.spotify")) service = "media_play_pause";
     if (CONFIRM_DOMAINS.has(domain)) {
       const pendingConfirm = confirmations.get(root);
       if (!pendingConfirm) {

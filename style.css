@@ -328,3 +328,27 @@ h1 { margin: 0; font-size: 1.4rem; font-weight: 600; }
   gap: 8px;
 }
 .ptz-presets button { border-radius: 999px; font-size: 1rem; padding: 10px 16px; }
+
+/* Media players: album art behind the tile while playing, plus transport buttons. */
+.tile .media-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--radius);
+  opacity: 0.45;
+  pointer-events: none;
+}
+.tile.has-art .tile-main { position: relative; text-shadow: 0 1px 3px #000; }
+.media-controls { position: relative; display: flex; gap: 6px; margin-top: 8px; }
+.media-controls[hidden] { display: none; }
+.media-controls button {
+  flex: 1;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 1.1rem;
+}
