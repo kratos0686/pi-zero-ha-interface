@@ -41,8 +41,8 @@ echo "==> Installing to $INSTALL_DIR (service user: $RUN_USER)"
 mkdir -p "$INSTALL_DIR"
 # Replace static/ wholesale so files removed upstream aren't served anymore.
 rm -rf "$INSTALL_DIR/static"
-cp -r "$SRC_DIR/server.py" "$SRC_DIR/kiosk.sh" "$SRC_DIR/watchdog.sh" "$SRC_DIR/static" "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/server.py" "$INSTALL_DIR/kiosk.sh" "$INSTALL_DIR/watchdog.sh"
+cp -r "$SRC_DIR/server.py" "$SRC_DIR/kiosk.sh" "$SRC_DIR/watchdog.sh" "$SRC_DIR/net-watchdog.sh" "$SRC_DIR/static" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/server.py" "$INSTALL_DIR/kiosk.sh" "$INSTALL_DIR/watchdog.sh" "$INSTALL_DIR/net-watchdog.sh"
 
 if [ ! -f "$INSTALL_DIR/config.json" ]; then
   cp "$SRC_DIR/config.example.json" "$INSTALL_DIR/config.json"
@@ -58,8 +58,12 @@ install_unit() {
 }
 
 install_unit ha-dashboard.service
+# Brings Wi-Fi back when the Zero drops off the network.
+install_unit ha-net-watchdog.service
+install_unit ha-net-watchdog.timer
 systemctl daemon-reload
 systemctl enable ha-dashboard.service
+systemctl enable --now ha-net-watchdog.timer
 # Restart (not just start) so a re-run picks up the newly copied files.
 systemctl restart ha-dashboard.service
 

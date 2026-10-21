@@ -17,7 +17,8 @@ SRC = "/opt/pi-ha-src"
 FILES = ["server.py", "kiosk.sh", "watchdog.sh", "install.sh", "config.example.json",
          "static/app.js", "static/index.html", "static/style.css", "static/bg.jpg",
          "systemd/ha-dashboard.service", "systemd/ha-kiosk.service",
-         "systemd/ha-watchdog.service", "systemd/ha-watchdog.timer"]
+         "systemd/ha-watchdog.service", "systemd/ha-watchdog.timer",
+         "net-watchdog.sh", "systemd/ha-net-watchdog.service", "systemd/ha-net-watchdog.timer"]
 
 # Tuning learned the hard way on a 512 MB Zero 2 W.
 TEXT_FILES = {

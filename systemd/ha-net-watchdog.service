@@ -1,0 +1,6 @@
+[Unit]
+Description=Reconnect Wi-Fi when the gateway stops answering
+
+[Service]
+Type=oneshot
+ExecStart=@INSTALL_DIR@/net-watchdog.sh
