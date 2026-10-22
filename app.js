@@ -492,15 +492,35 @@
   setInterval(() => { for (const c of cameras) refreshCamera(c); }, 1000);
 
   let liveTimer = null;
-  function openLive(tile, s) {
+  // snapshot=true shows ~1 fps stills instead of the MJPEG stream: decoding a
+  // full-resolution MJPEG stream froze the Zero when it popped up on its own.
+  let liveSnapTimer = null;
+  function openLive(tile, s, snapshot) {
     autoLive = false;
+    clearInterval(liveSnapTimer);
     const token = s.attributes.access_token;
     if (!token) { toast("No camera token yet"); return; }
     const ov = $("live");
     const img = $("live-img");
     $("live-name").textContent = tile.name || s.attributes.friendly_name || tile.entity;
     liveOpen = true;
-    img.src = cfg.haUrl + "/api/camera_proxy_stream/" + tile.entity + "?token=" + encodeURIComponent(token);
+    if (snapshot) {
+      let busy = false;
+      const grab = () => {
+        const cur = states.get(tile.entity);
+        const t = cur && cur.attributes.access_token;
+        if (busy || !t) return;
+        busy = true;
+        const next = new Image();
+        next.onload = () => { if (liveOpen) img.src = next.src; busy = false; };
+        next.onerror = () => { busy = false; };
+        next.src = cfg.haUrl + "/api/camera_proxy/" + tile.entity + "?token=" + encodeURIComponent(t) + "&_=" + Date.now();
+      };
+      grab();
+      liveSnapTimer = setInterval(grab, 1000);
+    } else {
+      img.src = cfg.haUrl + "/api/camera_proxy_stream/" + tile.entity + "?token=" + encodeURIComponent(token);
+    }
     ov.hidden = false;
     setupPtz(tile);
     keepLiveOpen();
@@ -512,6 +532,7 @@
   }
   function closeLive() {
     clearTimeout(liveTimer);
+    clearInterval(liveSnapTimer);
     clearTimeout(autoTimer);
     autoLive = false;
     if (ptzMoving) ptzStop();
@@ -712,7 +733,7 @@
     popCooldown.set(entityId, now);
     if (saverOn) { saverOn = false; $("saver").hidden = true; }
     if (secOpen) closeSecurity();
-    openLive(cam.tile, s);
+    openLive(cam.tile, s, true);
     autoLive = true;
     clearTimeout(autoTimer);
     autoTimer = setTimeout(() => { if (autoLive) closeLive(); }, 30000);
