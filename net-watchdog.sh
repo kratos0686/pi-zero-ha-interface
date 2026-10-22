@@ -23,7 +23,7 @@ echo "gateway ${gw:-<none>} unreachable for $n min"
 case "$n" in
   2|3)
     echo "reconnecting $IFACE"
-    nmcli device reconnect "$IFACE" || nmcli device connect "$IFACE" ;;
+    nmcli device connect "$IFACE" ;;
   5)
     echo "toggling the Wi-Fi radio"
     nmcli radio wifi off; sleep 5; nmcli radio wifi on ;;
