@@ -231,6 +231,7 @@
       tiles.set(tile.entity, { tile, el: root, parts });
       grid.append(root);
     }
+    if (list.length) grid.append(buildStatusTile());
     if (secOpen) openSecurity();
   }
 
@@ -492,6 +493,7 @@
 
   let liveTimer = null;
   function openLive(tile, s) {
+    autoLive = false;
     const token = s.attributes.access_token;
     if (!token) { toast("No camera token yet"); return; }
     const ov = $("live");
@@ -510,6 +512,8 @@
   }
   function closeLive() {
     clearTimeout(liveTimer);
+    clearTimeout(autoTimer);
+    autoLive = false;
     if (ptzMoving) ptzStop();
     const img = $("live-img");
     img.removeAttribute("src"); // aborts the MJPEG stream
@@ -651,14 +655,22 @@
   const IDLE_MS = 3 * 60 * 1000;
   let saverOn = false;
   let idleTimer = null;
+  // Night mode: 10pm-6am the screensaver comes on after 1 minute and is dimmed.
+  const NIGHT_START = 22;
+  const NIGHT_END = 6;
+  function isNight() {
+    const h = new Date().getHours();
+    return NIGHT_START > NIGHT_END ? (h >= NIGHT_START || h < NIGHT_END) : (h >= NIGHT_START && h < NIGHT_END);
+  }
   function resetIdle() {
     clearTimeout(idleTimer);
-    idleTimer = setTimeout(startSaver, IDLE_MS);
+    idleTimer = setTimeout(startSaver, isNight() ? 60000 : IDLE_MS);
   }
   function tickSaver() {
     const d = new Date();
     $("saver-time").textContent = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     $("saver-date").textContent = d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+    $("saver").classList.toggle("night", isNight());
   }
   function startSaver() {
     if (liveOpen || secOpen) { resetIdle(); return; } // someone is watching a camera
@@ -676,9 +688,96 @@
     for (const c of cameras) refreshCamera(c, true);
   });
   for (const ev of ["pointerdown", "keydown"]) {
-    document.addEventListener(ev, () => { if (!saverOn) resetIdle(); }, true);
+    document.addEventListener(ev, () => {
+      if (!saverOn) resetIdle();
+      autoLive = false; // someone is here: don't auto-close what they're watching
+    }, true);
   }
   resetIdle();
+
+  /* ---------- Auto-pop: show a camera when Frigate sees a person ---------- */
+
+  // Wakes the screen and shows that camera live for 30 s. At most once per
+  // camera every 5 minutes; set "autopop": false on a camera tile to skip it.
+  let autoLive = false;
+  let autoTimer = null;
+  const popCooldown = new Map();
+  function autoPop(entityId) {
+    const cam = cameras.find((c) => c.tile.entity === entityId);
+    const s = states.get(entityId);
+    if (!cam || cam.tile.autopop === false || !s || s.state === "unavailable") return;
+    if (liveOpen && !autoLive) return; // someone is already watching a camera
+    const now = Date.now();
+    if (now - (popCooldown.get(entityId) || 0) < 5 * 60000) return;
+    popCooldown.set(entityId, now);
+    if (saverOn) { saverOn = false; $("saver").hidden = true; }
+    if (secOpen) closeSecurity();
+    openLive(cam.tile, s);
+    autoLive = true;
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => { if (autoLive) closeLive(); }, 30000);
+    resetIdle();
+  }
+
+  /* ---------- Weather in the header and on the screensaver ---------- */
+
+  const WEATHER_ICONS = {
+    "clear-night": "🌙", sunny: "☀️", partlycloudy: "⛅", cloudy: "☁️", fog: "🌫️",
+    rainy: "🌧️", pouring: "🌧️", lightning: "⛈️", "lightning-rainy": "⛈️", hail: "🌨️",
+    snowy: "❄️", "snowy-rainy": "🌨️", windy: "💨", "windy-variant": "💨", exceptional: "⚠️",
+  };
+  let weatherId = null;
+  function renderWeather() {
+    const w = weatherId && states.get(weatherId);
+    let text = "";
+    if (w && w.state !== "unavailable" && w.state !== "unknown") {
+      const t = w.attributes.temperature;
+      text = (WEATHER_ICONS[w.state] || "") + (t != null ? " " + Math.round(t) + (w.attributes.temperature_unit || "°") : "");
+    }
+    $("weather").textContent = text;
+    $("saver-weather").textContent = text;
+  }
+
+  /* ---------- Pi status tile ---------- */
+
+  let statusParts = null;
+  let lastStatus = null;
+  function fmtUptime(sec) {
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    return d ? d + "d " + h + "h" : h ? h + "h " + m + "m" : m + "m";
+  }
+  function buildStatusTile() {
+    const root = el("div", "tile actionable status-tile");
+    const main = el("button", "tile-main");
+    main.type = "button";
+    statusParts = { name: el("div", "name", "Pi Status"), line: el("div", "value status-line", "…"), state: el("div", "state", "") };
+    main.append(el("div", "icon", "🖥️"), statusParts.line, statusParts.name, statusParts.state);
+    root.append(main);
+    root.addEventListener("click", () => {
+      const s = lastStatus;
+      if (!s) return;
+      toast("Wi-Fi " + (s.wifi_dbm ?? "?") + " dBm · RAM free " + s.mem_available_mb + " MB · swap used " +
+        s.swap_used_mb + " MB · load " + s.load + " · " + (s.temp_c != null ? s.temp_c + "°C · " : "") +
+        "up " + fmtUptime(s.uptime_s) + (s.net_last ? " · last Wi-Fi event: " + s.net_last : ""));
+    });
+    renderStatus();
+    return root;
+  }
+  function renderStatus() {
+    if (!statusParts || !lastStatus) return;
+    const s = lastStatus;
+    statusParts.line.textContent = "📶 " + (s.wifi_dbm ?? "?") + " · " + s.mem_available_mb + " MB";
+    statusParts.state.textContent = "up " + fmtUptime(s.uptime_s) + (s.net_last ? " · Wi-Fi fix " + s.net_last.slice(5, 16) : "");
+  }
+  async function pollStatus() {
+    if (saverOn || document.hidden) return;
+    try {
+      const r = await fetch("status.json", { cache: "no-store" });
+      if (r.ok) { lastStatus = await r.json(); renderStatus(); }
+    } catch (_) { /* server restarting */ }
+  }
+  setInterval(pollStatus, 30000);
+  pollStatus();
 
   /* ---------- Mirror Home Assistant ---------- */
 
@@ -855,7 +954,16 @@
         }
         const data = msg.event && msg.event.data;
         if (!data) return;
+        if (data.entity_id === weatherId) {
+          if (data.new_state) states.set(weatherId, data.new_state);
+          renderWeather();
+          return;
+        }
         const owner = badgeOwner.get(data.entity_id);
+        if (owner && data.entity_id.endsWith("_person_occupancy") && data.new_state &&
+            data.new_state.state === "on" && !(data.old_state && data.old_state.state === "on")) {
+          setTimeout(() => autoPop(owner), 0);
+        }
         if (!tiles.has(data.entity_id) && !owner) return;
         if (eventsDuringSnapshot) eventsDuringSnapshot.set(data.entity_id, data.new_state);
         if (data.new_state) states.set(data.entity_id, data.new_state);
@@ -898,7 +1006,11 @@
       // Rebuild from the snapshot so entities removed from HA don't linger
       // across reconnects, then replay anything newer than the snapshot.
       states.clear();
-      for (const s of all) if (tiles.has(s.entity_id) || badgeOwner.has(s.entity_id)) states.set(s.entity_id, s);
+      weatherId = cfg.weather || (all.find((x) => x.entity_id.startsWith("weather.")) || {}).entity_id || null;
+      for (const s of all) {
+        if (tiles.has(s.entity_id) || badgeOwner.has(s.entity_id) || s.entity_id === weatherId) states.set(s.entity_id, s);
+      }
+      renderWeather();
       for (const [id, s] of replay) {
         if (s) states.set(id, s);
         else states.delete(id);

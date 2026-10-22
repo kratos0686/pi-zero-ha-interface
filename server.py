@@ -114,15 +114,72 @@ def _host_name(host_header):
     return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
 
 
+NET_LOG = "/run/ha-net-watchdog.log"
+
+
+def read_status():
+    """Pi health for the dashboard's status tile (Linux /proc and /sys)."""
+    st = {"uptime_s": 0, "mem_available_mb": None, "swap_used_mb": None,
+          "load": None, "wifi_dbm": None, "temp_c": None, "net_last": None}
+    try:
+        with open("/proc/uptime") as f:
+            st["uptime_s"] = int(float(f.read().split()[0]))
+        mem = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, v = line.split(":", 1)
+                mem[k] = int(v.split()[0])
+        st["mem_available_mb"] = mem.get("MemAvailable", 0) // 1024
+        st["swap_used_mb"] = (mem.get("SwapTotal", 0) - mem.get("SwapFree", 0)) // 1024
+        st["load"] = round(os.getloadavg()[0], 2)
+    except (OSError, ValueError):
+        pass
+    try:
+        with open("/proc/net/wireless") as f:
+            for line in f.readlines()[2:]:
+                parts = line.split()
+                if parts and parts[0].startswith("wl"):
+                    st["wifi_dbm"] = int(float(parts[3]))
+                    break
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            st["temp_c"] = round(int(f.read()) / 1000, 1)
+    except (OSError, ValueError):
+        pass
+    try:
+        with open(NET_LOG) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        st["net_last"] = lines[-1] if lines else None
+    except OSError:
+        pass
+    return st
+
+
 def make_handler(config_path, loopback_only=True):
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
         def do_GET(self):
-            if self.path.split("?", 1)[0] == "/config.json":
+            path = self.path.split("?", 1)[0]
+            if path == "/config.json":
                 return self._send_config()
+            if path == "/status.json":
+                return self._send_status()
             return super().do_GET()
+
+        def _send_status(self):
+            if not self._config_request_allowed():
+                return self.send_error(HTTPStatus.FORBIDDEN)
+            data = json.dumps(read_status()).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
         def _config_request_allowed(self):
             # Browsers label cross-origin subresource requests; refuse them so a

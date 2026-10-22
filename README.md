@@ -103,3 +103,11 @@ curl http://127.0.0.1:8080/config.json
 python3 server.py --config config.example.json   # http://127.0.0.1:8080/
 python3 -m unittest discover -s tests -v
 ```
+
+## Extras
+
+- **Weather**: the first `weather.*` entity in Home Assistant (or `"weather"` in config.json) shows next to the clock and on the screensaver.
+- **Night mode**: 10pm-6am the screensaver starts after 1 minute and is dimmed.
+- **Auto-pop**: when Frigate's `<camera>_person_occupancy` turns on, that camera opens live for 30 s (once per camera per 5 min). Add `"autopop": false` to a camera tile to skip it.
+- **Pi Status tile**: Wi-Fi signal, free memory and uptime from `/status.json`; tap it for details including the last Wi-Fi recovery.
+
